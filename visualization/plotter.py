@@ -1,134 +1,100 @@
 """
-Visualization tools for quadrotor simulation results.
+可视化工具 —— 四旋翼仿真结果的多控制器对比绘图
+================================================
 
-Supports:
-- 3D trajectory plots
-- Position/velocity error convergence plots (linear and log scale)
-- Control input plots
-- Multi-controller comparison overlay
+功能:
+    - 3D 轨迹图（含 2D 回退方案）
+    - 位置/速度/姿态误差的时间历程（线性坐标 + 对数坐标）
+    - 控制输入（推力、力矩）对比图
+    - 多控制器叠加对比模式
+
+使用示例:
+    plotter = ResultPlotter(save_dir='./figures')
+    plotter.plot_comparison(results, title='Step Response Comparison')
 """
 
 import numpy as np
 import matplotlib
-matplotlib.use('Agg')
+matplotlib.use('Agg')          # 非交互式后端（无需 GUI）
 import matplotlib.pyplot as plt
 import os
 
 
-# Color palette for consistent multi-controller plots
+# ============================================================
+# 统一配色方案（保证不同图中同一控制器的颜色一致）
+# ============================================================
 COLORS = {
-    'lee_pd':     '#1f77b4',  # blue
-    'hpc_mu0':    '#ff7f0e',  # orange
-    'hpc_mu_neg': '#2ca02c',  # green
-    'linear':     '#d62728',  # red
-    'hpc':        '#9467bd',  # purple
-    'reference':  '#000000',  # black
+    'lee_pd':     '#1f77b4',  # 蓝色 — Lee 几何 PD
+    'hpc_mu0':    '#ff7f0e',  # 橙色 — HPC μ=0
+    'hpc_mu_neg': '#2ca02c',  # 绿色 — HPC μ<0
+    'linear':     '#d62728',  # 红色 — 线性控制器
+    'hpc':        '#9467bd',  # 紫色 — HPC 通用
+    'reference':  '#000000',  # 黑色 — 参考轨迹
 }
-
-LINESTYLES = {
-    'linear':     '--',
-    'hpc':        '-',
-    'reference':  ':',
-}
-
-
-def plot_trajectory_3d(ax, pos_log, label=None, color=None, ls='-', lw=1.5,
-                       alpha=1.0):
-    """Plot 3D trajectory on existing axes."""
-    ax.plot(pos_log[:, 0], pos_log[:, 1], pos_log[:, 2],
-            color=color, ls=ls, lw=lw, label=label, alpha=alpha)
-
-
-def plot_error_convergence(ax, t, error_log, label=None, color=None, ls='-',
-                           lw=1.5, log_scale=True):
-    """Plot error norm over time."""
-    if log_scale:
-        ax.semilogy(t, error_log, color=color, ls=ls, lw=lw, label=label)
-    else:
-        ax.plot(t, error_log, color=color, ls=ls, lw=lw, label=label)
-
-
-def plot_control_input(ax, t, u_log, labels=None, colors=None):
-    """Plot control inputs as stacked subplots."""
-    n_inputs = u_log.shape[1]
-    if labels is None:
-        labels = [f'u_{i}' for i in range(n_inputs)]
-    if colors is None:
-        colors = plt.cm.tab10(np.linspace(0, 1, n_inputs))
-
-    for i in range(n_inputs):
-        ax.plot(t, u_log[:, i], color=colors[i], lw=1.5, label=labels[i])
 
 
 class ResultPlotter:
     """
-    High-level plotter for quadrotor simulation comparisons.
+    仿真结果的高级可视化类。
 
-    Usage:
-        plotter = ResultPlotter(save_dir='./figures')
-        plotter.plot_comparison(results_dict, title='...')
+    支持:
+        - 多控制器对比面板（3 行 × 4 列）
+        - 3D 轨迹图
+        - 控制输入对比图
     """
 
     def __init__(self, save_dir=None, use_cjk=False):
+        """
+        参数:
+            save_dir: 图片保存目录（None 则只显示不保存）
+            use_cjk:  是否使用中文标签（需要系统安装中文字体）
+        """
         self.save_dir = save_dir
         self.use_cjk = use_cjk
 
-        if use_cjk:
-            self._setup_cjk_fonts()
-
-    def _setup_cjk_fonts(self):
-        """Try to configure CJK fonts."""
-        import matplotlib.font_manager as fm
-        cjk = [f.name for f in fm.fontManager.ttflist
-               if any(k in f.name for k in
-                      ['SimHei', 'WenQuanYi', 'Noto Sans CJK',
-                       'Source Han', 'CJK', 'Heiti', 'Songti'])]
-        if cjk:
-            plt.rcParams['font.sans-serif'] = cjk[:1] + ['DejaVu Sans']
-        plt.rcParams['axes.unicode_minus'] = False
-
     def L(self, cn, en):
-        """Return Chinese or English label based on font availability."""
-        return en if not self.use_cjk else cn
+        """根据字体可用性返回中文或英文标签。"""
+        return cn if self.use_cjk else en
 
     def plot_comparison(self, results, title='', filename='comparison.png',
                         figsize=(20, 15)):
         """
-        Full comparison plot for multiple controllers.
+        完整的多控制器对比图（3 行 × 4 列面板）。
 
-        Parameters
-        ----------
-        results : dict
-            {label: {'t': t, 'state': state_log, 'input': input_log, 'ref': ref_log}}
-            Each state_log is (N+1, 18) with SE(3) state.
-        title : str
-            Overall figure title.
-        filename : str
-            Output filename (relative to save_dir).
-        figsize : tuple
-            Figure size.
+        面板布局:
+            第 1 行: 位置误差 (x, y, z) + 位置误差范数（对数坐标）
+            第 2 行: 速度误差 (x, y, z) + 速度误差范数（对数坐标）
+            第 3 行: 姿态误差 (x, y, z) + 姿态误差范数（对数坐标）
+
+        参数:
+            results: dict, {控制器名称: {'t': t, 'state': state_log, 'input': u_log, 'ref': ref_log}}
+            title:   总标题
+            filename: 保存的文件名（相对于 save_dir）
+            figsize:  图形尺寸
         """
         n_results = len(results)
         fig, axes = plt.subplots(3, 4, figsize=figsize)
         fig.suptitle(title, fontsize=14, fontweight='bold')
 
         labels = list(results.keys())
+
+        # 为每个控制器分配颜色
         colors_map = {}
         for i, label in enumerate(labels):
             colors_map[label] = list(COLORS.values())[i % len(COLORS)]
 
-        t_min = min(results[l]['t'][-1] for l in labels)
-
-        # Row 1: Position errors (x, y, z)
+        # ====== 第 1 行：位置误差 (x, y, z) + 位置范数 ======
         for idx, axis in enumerate(['x', 'y', 'z']):
             ax = axes[0, idx]
             for label in labels:
                 r = results[label]
                 pos = r['state'][:, idx]
                 if r['ref'] is not None:
+                    # 轨迹跟踪：误差 = 实际位置 - 参考位置
                     pos_ref = r['ref'][:, idx]
                     err = pos - pos_ref
                 else:
+                    # 阶跃/悬停：误差 = 实际位置（因为目标是零）
                     err = pos
                 ax.plot(r['t'], err, color=colors_map[label], lw=1.5, label=label)
             ax.set_xlabel('t [s]')
@@ -138,7 +104,7 @@ class ResultPlotter:
             if idx == 0:
                 ax.legend(fontsize=7)
 
-        # Row 1, col 4: Position error norm (log scale)
+        # 位置误差范数（对数坐标 — 便于观察收敛速率）
         ax = axes[0, 3]
         for label in labels:
             r = results[label]
@@ -148,13 +114,14 @@ class ResultPlotter:
                 err = np.linalg.norm(pos - pos_ref, axis=1)
             else:
                 err = np.linalg.norm(pos, axis=1)
+            # 加微小偏移防止 log(0)
             ax.semilogy(r['t'], err + 1e-16, color=colors_map[label], lw=1.5, label=label)
         ax.set_xlabel('t [s]')
         ax.set_ylabel('||e_pos|| [m]')
         ax.set_title('Position Error Norm (log)')
         ax.grid(True, alpha=0.3)
 
-        # Row 2: Velocity errors
+        # ====== 第 2 行：速度误差 ======
         for idx, axis in enumerate(['x', 'y', 'z']):
             ax = axes[1, idx]
             for label in labels:
@@ -171,7 +138,7 @@ class ResultPlotter:
             ax.set_title(f'Velocity Error {axis.upper()}')
             ax.grid(True, alpha=0.3)
 
-        # Row 2, col 4: Velocity error norm
+        # 速度范数（对数坐标）
         ax = axes[1, 3]
         for label in labels:
             r = results[label]
@@ -187,7 +154,7 @@ class ResultPlotter:
         ax.set_title('Velocity Error Norm (log)')
         ax.grid(True, alpha=0.3)
 
-        # Row 3: Attitude error (extracted via log_so3 from R_e = R * R_d')
+        # ====== 第 3 行：姿态误差（指数坐标 θ_e） ======
         from models.quadrotor_se3 import log_so3
         for idx, axis in enumerate(['x', 'y', 'z']):
             ax = axes[2, idx]
@@ -199,10 +166,10 @@ class ResultPlotter:
                     R = state[k, 6:15].reshape(3, 3)
                     if r['ref'] is not None:
                         R_d = r['ref'][k, 6:15].reshape(3, 3)
-                        R_e = R @ R_d.T
+                        R_e = R @ R_d.T    # 姿态误差旋转矩阵
                     else:
-                        R_e = R
-                    attitude_err[k] = log_so3(R_e)
+                        R_e = R             # 无参考时用当前姿态
+                    attitude_err[k] = log_so3(R_e)  # 指数坐标
                 ax.plot(r['t'], attitude_err[:, idx], color=colors_map[label],
                         lw=1.5, label=label)
             ax.set_xlabel('t [s]')
@@ -210,7 +177,7 @@ class ResultPlotter:
             ax.set_title(f'Attitude Error {axis.upper()}')
             ax.grid(True, alpha=0.3)
 
-        # Row 3, col 4: Attitude error norm
+        # 姿态范数（对数坐标）
         ax = axes[2, 3]
         for label in labels:
             r = results[label]
@@ -224,8 +191,7 @@ class ResultPlotter:
                 else:
                     R_e = R
                 att_norm[k] = np.linalg.norm(log_so3(R_e))
-            ax.semilogy(r['t'], att_norm + 1e-16, color=colors_map[label],
-                        lw=1.5)
+            ax.semilogy(r['t'], att_norm + 1e-16, color=colors_map[label], lw=1.5)
         ax.set_xlabel('t [s]')
         ax.set_ylabel('|theta_e| [rad]')
         ax.set_title('Attitude Error Norm (log)')
@@ -242,15 +208,21 @@ class ResultPlotter:
         return fig, axes
 
     def plot_trajectory_3d(self, results, title='', filename='trajectory_3d.png'):
-        """3D trajectory comparison plot."""
+        """
+        3D 轨迹对比图。
+
+        含 matplotlib 3D 投影不可用时的 2D 回退方案（Bug #6 的绕过）。
+        """
         fig = plt.figure(figsize=(12, 10))
+
+        # 尝试 3D 投影
         try:
             ax = fig.add_subplot(111, projection='3d')
         except Exception:
-            # Fallback: 2D projections
             ax = None
 
         if ax is not None:
+            # ---- 3D 模式 ----
             labels = list(results.keys())
             for i, label in enumerate(labels):
                 r = results[label]
@@ -259,6 +231,7 @@ class ResultPlotter:
                 ax.plot(pos[:, 0], pos[:, 1], pos[:, 2],
                         color=color, lw=1.5, label=label)
 
+            # 参考轨迹（如果有）
             if results[labels[0]]['ref'] is not None:
                 ref_pos = results[labels[0]]['ref'][:, 0:3]
                 ax.plot(ref_pos[:, 0], ref_pos[:, 1], ref_pos[:, 2],
@@ -270,7 +243,8 @@ class ResultPlotter:
             ax.set_title(title)
             ax.legend(fontsize=9)
         else:
-            # Fallback: plot XY and XZ projections
+            # ---- 2D 回退方案（当 matplotlib 3D 不可用时）----
+            # 绘制 XY 和 XZ 两个投影
             ax1 = fig.add_subplot(121)
             ax2 = fig.add_subplot(122)
             labels = list(results.keys())
@@ -290,16 +264,19 @@ class ResultPlotter:
             fig.savefig(os.path.join(self.save_dir, filename), dpi=150,
                         bbox_inches='tight')
 
-        return fig, ax
+        return fig, ax if ax is not None else (ax1, ax2)
 
     def plot_control_inputs(self, results, title='', filename='control_inputs.png',
                             figsize=(16, 10)):
-        """Control input comparison across controllers."""
+        """
+        控制输入对比图。
+
+        2×2 子图: [推力, τ_x, τ_y, τ_z]
+        """
         labels = list(results.keys())
-        n_controllers = len(labels)
 
         fig, axes = plt.subplots(2, 2, figsize=figsize)
-        input_names = ['Thrust [N]', 'tau_x [N·m]', 'tau_y [N·m]', 'tau_z [N·m]']
+        input_names = ['Thrust [N]', 'τ_x [N·m]', 'τ_y [N·m]', 'τ_z [N·m]']
 
         for i, ax in enumerate(axes.flat):
             for j, label in enumerate(labels):
