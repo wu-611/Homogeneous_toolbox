@@ -1,0 +1,78 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Release Notes for HCS Toolbox Version 0.2
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+I. New functions
+
+  1) hnorm_newton
+     = canonical (implicit) homogeneous norm computed by Newton Method 
+
+  2) hnorm_r
+     = explicit homogenenous norm for weighted and diagonalizable dilations 
+
+  3) hnorm_ANN
+     = explicit homogenenous norm given by Artificial Neural Network (ANN)
+  
+  4) approx_hnorm_r
+     = approximation of canonical homogeneous norm by homogenenous hnorm_r
+
+  5) approx_hnorm_ANN
+     = approximation of canonical homogeneous norm by homogenenous hnorm_ANN
+
+  6) hphi
+     = homogeneous homeomorphism on R^n
+
+  7) hphi_in
+     = inverse homogeneous homeomorphism on R^n
+
+  8) hadd
+     = summation of vectors in homogeneous Euclidean space R^n_d
+
+  9) hdot
+     = multiplication of a vector by a scalar in homohgeneous Euclidean space R^n_d
+
+  10) hinner
+     = inner product of vectors in homohgeneous Euclidean space R^n_d 
+
+II. New examples
+
+  1) demo_c_hpc 
+     = demo of constant-time stabilization by Homogeneous Proportional Control (HPC)
+
+  2) demo_hnorm_r
+     = demo of approximation of canonical homogeneous norm by the explicit homogenenous norm hnorm_r
+ 
+  3) demo_hnorm_r
+     = demo of approximation of canonical homogeneous norm by the explicit homogenenous norm hnorm_ANN
+ 
+  4) demo_halgebra
+     = demo of vector calculus in homogeneous Eucledean space R^2_d
+
+II. Corrections of functions
+
+1) hnorm
+    + tol - computation tolerance
+    + bug fixing
+    - alpha and beta (admissible bounds for the norm) are not available anymore
+ 
+
+2) e_hpc, si_hpc, ...
+    + h_fun - a solver for homogenenous norm as a parameter
+    + bug fixing
+   
+4) ZOH
+   + control of computational tolerance
+
+5) hproj
+   + h_fun - a solver for homogenenous norm as a parameter
+   + control of computational tolerance
+
+6) hpc_design
+   + bug fixing
+
+7) ho_design
+   + bug fixing
+
+8) demos are modified accordinghly with modifications of above functions
+ 
+ 

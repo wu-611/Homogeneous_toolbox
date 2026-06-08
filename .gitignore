@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
+
+# Build artifacts
+hcs_toolbox_cpp/build/
+*.out
+*.o
+*.bin
+
+# Simulation outputs
+figures/
+*.png
+*.jpg
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Sensitive
+.env
+*.secret

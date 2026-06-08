@@ -1,0 +1,282 @@
+function [Roll_norm, Pitch_norm] = Homogeneous_XY_Roll_Pitch_Control(...
+    X_ref, X_px4, Y_ref, Y_px4, ...
+    VX_ref, VX_px4, VY_ref, VY_px4, ...
+    Roll_px4, Pitch_px4, ...
+    Rate_Roll_px4, Rate_Pitch_px4, ...
+    P_xy, Gd_xy, K_xy_nl, K0_xy) % 新增 4 个需要设为 Parameter 的齐次矩阵
+    
+    % ==========================================
+    % 第一重护体：声明外部函数与内存预分配
+    % ==========================================
+    coder.extrinsic('hnorm', 'expm');
+    
+    q_val   = 0.0;              % 钉死 q_val 是一个 1x1 的标量
+    D_q_sat = zeros(8, 8);      % 钉死 D_q_sat 是一个 8x8 的矩阵
+    v_tmp   = [0.0; 0.0];       % 钉死 v_tmp 是 2x1 的输出向量
+
+    % --- 0. 强制数据类型转换 (防总线数据类型不匹配报错) ---
+    X_ref = double(X_ref);         X_px4 = double(X_px4);
+    Y_ref = double(Y_ref);         Y_px4 = double(Y_px4);
+    VX_ref = double(VX_ref);       VX_px4 = double(VX_px4);
+    VY_ref = double(VY_ref);       VY_px4 = double(VY_px4);
+    Roll_px4 = double(Roll_px4);   Pitch_px4 = double(Pitch_px4);
+    Rate_Roll_px4 = double(Rate_Roll_px4); Rate_Pitch_px4 = double(Rate_Pitch_px4);
+    
+    % --- 1. 误差限幅 (防起飞初始误差过大导致积分/齐次范数爆炸) ---
+    POS_LIMIT = 1.0; 
+    VEL_LIMIT = 2.0;
+    
+    e_x  = max(-POS_LIMIT, min(POS_LIMIT, X_ref - X_px4));
+    e_y  = max(-POS_LIMIT, min(POS_LIMIT, Y_ref - Y_px4));
+    e_vx = max(-VEL_LIMIT, min(VEL_LIMIT, VX_ref - VX_px4));
+    e_vy = max(-VEL_LIMIT, min(VEL_LIMIT, VY_ref - VY_px4));
+    
+    % ========================================================
+    % --- 2. 构建统一的 8 维状态向量 ---
+    % ========================================================
+    % 状态向量顺序: [e_x; e_y; e_vx; e_vy; Pitch(theta); -Roll(-phi); Rate_Pitch(q); -Rate_Roll(-p)]
+    % 这里的负号继承了你原先代码里为了抵消坐标系同向正反馈的物理反转
+    xi_xy = [e_x; e_y; e_vx; e_vy; Pitch_px4; -Roll_px4; Rate_Pitch_px4; -Rate_Roll_px4];
+
+    % --- 3. 齐次度参数设定 ---
+    mu_xy = -1; % 8阶系统对应的齐次度通常为 -1
+    tol = 1e-4;
+    Nmax = 20;
+
+    % ========================================================
+    % --- 4. 核心齐次控制律解算 ---
+    % ========================================================
+    if norm(xi_xy) < tol
+        v_tmp = K0_xy * xi_xy; % 极小误差退化为线性
+    else
+        % 调用工具箱求解 8 维状态的齐次范数 q
+        q_val = hnorm(xi_xy, Gd_xy, P_xy, tol, Nmax);
+        
+        % 饱和限制 (防死区和过度激进)
+        % 0.8 作为下限能很好地抑制小误差时的神经质抖动
+        q_sat = max(0.8, min(1.0, q_val));
+        
+        D_q_sat = expm(-log(q_sat) * Gd_xy);
+        
+        % 齐次非线性控制律 (输出 2x1 的虚拟力矩向量)
+        v_tmp = K0_xy * xi_xy + (q_sat^(1 + mu_xy)) * K_xy_nl * D_q_sat * xi_xy;
+    end
+
+    % ========================================================
+    % --- 5. 虚拟扭矩拆解与极性恢复 (核心映射区) ---
+    % ========================================================
+    % 矩阵运算得到的第一行是 Pitch 虚拟力矩，第二行是 Roll 虚拟力矩
+    U_pitch_torque = v_tmp(1);
+    virtual_u_roll = v_tmp(2);
+    
+    % 【最关键一步】：虚拟扭矩必须再次取反，才能变为真实的横滚扭矩！
+    U_roll_torque = -virtual_u_roll; 
+
+    % ========================================================
+    % --- 6. 真实物理模型映射 ---
+    % ========================================================
+    Ixx = 0.0211;  
+    Iyy = 0.0219;  
+    RP_SCALE = 30; 
+    
+    Pitch_norm_temp = U_pitch_torque * Iyy * RP_SCALE;
+    Roll_norm_temp  = U_roll_torque * Ixx * RP_SCALE;
+
+    % ==========================================
+    % 第二重护体：强制输出标量截断 (斩断维度报错)
+    % ==========================================
+    Pitch_norm = double(Pitch_norm_temp(1));
+    Roll_norm  = double(Roll_norm_temp(1));
+    
+    % --- 7. 安全限幅 ---
+    Roll_norm  = max(-0.4, min(0.4, Roll_norm));
+    Pitch_norm = max(-0.4, min(0.4, Pitch_norm));
+end
+
+
+
+function [Roll_norm, Pitch_norm] = Homogeneous_XY_Roll_Pitch_Control(...
+    X_ref, X_px4, Y_ref, Y_px4, ...
+    VX_ref, VX_px4, VY_ref, VY_px4, ...
+    Roll_px4, Pitch_px4, ...
+    Rate_Roll_px4, Rate_Pitch_px4, ...
+    P_xy, Gd_xy, K_xy_nl, K0_xy) % 新增 4 个需要设为 Parameter 的齐次矩阵
+    
+    % ==========================================
+    % 第一重护体：声明外部函数与内存预分配
+    % ==========================================
+    coder.extrinsic('hnorm', 'expm');
+    
+    q_val   = 0.0;              % 钉死 q_val 是一个 1x1 的标量
+    D_q_sat = zeros(8, 8);      % 钉死 D_q_sat 是一个 8x8 的矩阵
+    v_tmp   = [0.0; 0.0];       % 钉死 v_tmp 是 2x1 的输出向量
+
+    % --- 0. 强制数据类型转换 (防总线数据类型不匹配报错) ---
+    X_ref = double(X_ref);         X_px4 = double(X_px4);
+    Y_ref = double(Y_ref);         Y_px4 = double(Y_px4);
+    VX_ref = double(VX_ref);       VX_px4 = double(VX_px4);
+    VY_ref = double(VY_ref);       VY_px4 = double(VY_px4);
+    Roll_px4 = double(Roll_px4);   Pitch_px4 = double(Pitch_px4);
+    Rate_Roll_px4 = double(Rate_Roll_px4); Rate_Pitch_px4 = double(Rate_Pitch_px4);
+    
+    % --- 1. 误差限幅 (防起飞初始误差过大导致积分/齐次范数爆炸) ---
+    POS_LIMIT = 1.0; 
+    VEL_LIMIT = 2.0;
+    
+    e_x  = max(-POS_LIMIT, min(POS_LIMIT, X_ref - X_px4));
+    e_y  = max(-POS_LIMIT, min(POS_LIMIT, Y_ref - Y_px4));
+    e_vx = max(-VEL_LIMIT, min(VEL_LIMIT, VX_ref - VX_px4));
+    e_vy = max(-VEL_LIMIT, min(VEL_LIMIT, VY_ref - VY_px4));
+    
+    % ========================================================
+    % --- 2. 构建统一的 8 维状态向量 ---
+    % ========================================================
+    % 状态向量顺序: [e_x; e_y; e_vx; e_vy; Pitch(theta); -Roll(-phi); Rate_Pitch(q); -Rate_Roll(-p)]
+    % 这里的负号继承了你原先代码里为了抵消坐标系同向正反馈的物理反转
+    xi_xy = [e_x; e_y; e_vx; e_vy; Pitch_px4; -Roll_px4; Rate_Pitch_px4; -Rate_Roll_px4];
+
+    % --- 3. 齐次度参数设定 ---
+    mu_xy = -1; % 8阶系统对应的齐次度通常为 -1
+    tol = 1e-4;
+    Nmax = 20;
+
+    % ========================================================
+    % --- 4. 核心齐次控制律解算 ---
+    % ========================================================
+    if norm(xi_xy) < tol
+        v_tmp = K0_xy * xi_xy; % 极小误差退化为线性
+    else
+        % 调用工具箱求解 8 维状态的齐次范数 q
+        q_val = hnorm(xi_xy, Gd_xy, P_xy, tol, Nmax);
+        
+        % 饱和限制 (防死区和过度激进)
+        % 0.8 作为下限能很好地抑制小误差时的神经质抖动
+        q_sat = max(0.8, min(1.0, q_val));
+        
+        D_q_sat = expm(-log(q_sat) * Gd_xy);
+        
+        % 齐次非线性控制律 (输出 2x1 的虚拟力矩向量)
+        v_tmp = K0_xy * xi_xy + (q_sat^(1 + mu_xy)) * K_xy_nl * D_q_sat * xi_xy;
+    end
+
+    % ========================================================
+    % --- 5. 虚拟扭矩拆解与极性恢复 (核心映射区) ---
+    % ========================================================
+    % 矩阵运算得到的第一行是 Pitch 虚拟力矩，第二行是 Roll 虚拟力矩
+    U_pitch_torque = v_tmp(1);
+    virtual_u_roll = v_tmp(2);
+    
+    % 【最关键一步】：虚拟扭矩必须再次取反，才能变为真实的横滚扭矩！
+    U_roll_torque = -virtual_u_roll; 
+
+    % ========================================================
+    % --- 6. 真实物理模型映射 ---
+    % ========================================================
+    Ixx = 0.0211;  
+    Iyy = 0.0219;  
+    RP_SCALE = 30; 
+    
+    Pitch_norm_temp = U_pitch_torque * Iyy * RP_SCALE;
+    Roll_norm_temp  = U_roll_torque * Ixx * RP_SCALE;
+
+    % ==========================================
+    % 第二重护体：强制输出标量截断 (斩断维度报错)
+    % ==========================================
+    Pitch_norm = double(Pitch_norm_temp(1));
+    Roll_norm  = double(Roll_norm_temp(1));
+    
+    % --- 7. 安全限幅 ---
+    Roll_norm  = max(-0.4, min(0.4, Roll_norm));
+    Pitch_norm = max(-0.4, min(0.4, Pitch_norm));
+end
+
+
+
+
+function [Thrust_norm, u_i_rate] = Homogeneous_Z_Control(e_z, e_z_dot, u_i_state, theta, phi, K_z_nl, K0_z, Gd_z, Ki_new_z, P_z)
+    % ==========================================
+    % 第一重护体：声明外部函数与内存预分配
+    % ==========================================
+    coder.extrinsic('hnorm', 'expm');
+    
+    q_val   = 0.0;              % 钉死 q_val 是一个 1x1 的双精度标量
+    D_q     = zeros(2, 2);      % 钉死 D_q 是一个 2x2 的双精度矩阵
+    u_h_tmp = 0.0;              % 预分配 PD 虚拟控制量
+    u_i_tmp = 0.0;              % 预分配 积分 变化率
+
+    % --- 0. 强制数据类型转换 ---
+    e_z       = double(e_z);       
+    e_z_dot   = double(e_z_dot);     
+    u_i_state = double(u_i_state); % 外部积分器累加进来的值
+    theta     = double(theta);
+    phi       = double(phi);
+
+    % --- 物理与映射参数 (完全继承你的 Init_control.m) ---
+    m = 1.4; 
+    g = 9.8; 
+    THR_HOVER = 0.609; 
+    
+    % --- 齐次控制基础参数 ---
+    mu_z = -0.5;
+    tol = 1e-4;
+    Nmax = 20;
+
+    % --- 1. 误差向量构建 ---
+    E_z = [e_z; e_z_dot];
+
+    % ==========================================
+    % --- 2. 核心 HPIC 齐次积分控制逻辑 ---
+    % ==========================================
+    if norm(E_z) < tol
+        u_h_tmp = K0_z * E_z;
+        u_i_tmp = 0.0; % 极小误差区关闭积分率，防除零
+    else
+        % 调用工具箱计算齐次范数
+        q_val = hnorm(E_z, Gd_z, P_z, tol, Nmax);
+        
+        % 饱和限制 (限制 q 不要过小或过大)
+        q_sat = max(1e-4, min(10.0, q_val));
+        
+        D_q = expm(-log(q_sat) * Gd_z);
+        px = D_q * E_z;
+        
+        % 比例-微分项 (PD)
+        u_h_tmp = K0_z * E_z + (q_sat^(1 + mu_z)) * K_z_nl * px;
+        
+        % 积分状态变化率 (I) - 核心抗饱和逻辑
+        den = px' * P_z * Gd_z * px;
+        if abs(den) < 1e-6
+            u_i_tmp = 0.0;
+        else
+            u_i_tmp = (q_sat^(1 + 2*mu_z)) * Ki_new_z * px / den;
+        end
+    end
+
+    % ==========================================
+    % 第二重护体：强制提取标量 (切断维度爆炸)
+    % ==========================================
+    u_h = double(u_h_tmp(1));
+    u_i_rate = double(u_i_tmp(1)); 
+
+    % --- 3. 物理控制量融合与姿态补偿 ---
+    % 总虚拟控制量 = PD项 + 外部累加好的I项
+    v_total = u_h + u_i_state;
+    
+    % 重新激活姿态补偿！
+    % 引入 max(0.5, ...) 防止极端翻滚(>60度)时分母趋近0导致推力无限放大
+    cos_theta_phi = max(0.5, cos(phi) * cos(theta)); 
+    
+    % 计算实际物理推力 U1 (牛顿)
+    U1_force = (m / cos_theta_phi) * (g + v_total);
+
+    % --- 4. PX4 底层映射与第三重护体 ---
+    % 悬停推力映射，基于 THR_HOVER 的等比例缩放
+    Thrust_norm_temp = (U1_force / (m * g)) * THR_HOVER;
+    
+    % 最终护体标量化，并加入安全限幅 (防止空中停桨或电机满载烧毁)
+    Thrust_norm = double(Thrust_norm_temp(1));
+    Thrust_norm = max(0.05, min(0.95, Thrust_norm));
+    
+    % 如果你的控制分配器确实要求向下推力为负，解开下方的注释即可：
+    % Thrust_norm = -Thrust_norm;
+end
