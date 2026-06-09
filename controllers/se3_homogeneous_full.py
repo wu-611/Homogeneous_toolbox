@@ -70,7 +70,7 @@ class SE3HomogeneousController:
     """
 
     def __init__(self, m, J, g=9.81, mu_p=0.0, mu_a=0.0,
-                 K_pos=None, K1_att=None, k2_att=None):
+                 K_pos=None, K1_att=None, k2_att=None, max_tilt=60.0):
         """
         参数:
             m: 飞行器质量 [kg]
@@ -81,12 +81,14 @@ class SE3HomogeneousController:
             K_pos: 位置线性增益（默认自动配置）
             K1_att: 姿态比例增益（默认 200·I₃）
             k2_att: 姿态阻尼增益（默认 100）
+            max_tilt: 最大允许推力倾角 [deg]（默认 60°）
         """
         self.m = m
         self.J = np.asarray(J)
         self.g = g
         self.mu_p = mu_p
         self.mu_a = mu_a
+        self.max_tilt = np.deg2rad(max_tilt)
 
         # 设计位置回路 HPC（三个独立的双积分器通道）
         self.pos_hpc = PositionHPC(m, K_pos, mu_p)
@@ -146,6 +148,25 @@ class SE3HomogeneousController:
         # ====== 第2步：重力补偿 + 期望推力方向 ======
         # F_des 是比力 [N/kg] = [m/s²]，即单位质量的期望力
         F_des = u_pos + np.array([0., 0., self.g])
+
+        # ---- 推力倾角限制（参考 Elastic-Tracker, Lee 2010）----
+        # 目的: 防止大误差时 b3_des 过度偏离竖直方向
+        #   → 机体过度倾斜 → 垂直推力不足 → Z轴下坠 → 正反馈发散
+        # 原理: 保持力的方向，但缩放水平分量使倾角 ≤ max_tilt
+        # 公式: F_h_new = s·F_h,  s.t. F_z / |F_new| = cos(max_tilt)
+        #       s = F_z · tan(max_tilt) / |F_h|
+        max_tilt = self.max_tilt  # 最大允许倾角 [rad]
+        F_h = np.linalg.norm(F_des[:2])
+        if F_h > 1e-10:
+            cos_tilt = F_des[2] / np.linalg.norm(F_des)
+            if cos_tilt < np.cos(max_tilt) and F_des[2] > 0:
+                # 倾角超限且 F_z>0（机体未翻转），缩放水平分量
+                s = F_des[2] * np.tan(max_tilt) / F_h
+                F_des = np.array([s * F_des[0], s * F_des[1], F_des[2]])
+            elif F_des[2] <= 0:
+                # 极端情况: F_z ≤ 0（期望力向下），强制恢复为竖直向上
+                F_des = np.array([0., 0., self.g])
+
         b3_des = F_des / (np.linalg.norm(F_des) + 1e-10)
 
         # ====== 第3步：期望姿态解算 ======
@@ -243,7 +264,7 @@ class LeeGeometricPD:
     """
 
     def __init__(self, m, J, g=9.81,
-                 kx=8.4, kv=7.0, kR=4.0, komega=2.0):
+                 kx=8.4, kv=7.0, kR=4.0, komega=2.0, max_tilt=60.0):
         """
         参数:
             m: 飞行器质量 [kg]
@@ -251,6 +272,7 @@ class LeeGeometricPD:
             g: 重力加速度
             kx, kv: 位置 PD 增益 [N/m] 和 [N/(m/s)]
             kR, komega: 姿态 PD 增益 [N·m/rad] 和 [N·m/(rad/s)]
+            max_tilt: 最大允许推力倾角 [deg]（默认 60°）
         """
         self.m = m
         self.J = np.asarray(J)
@@ -259,6 +281,7 @@ class LeeGeometricPD:
         self.kv = kv
         self.kR = kR
         self.komega = komega
+        self.max_tilt = np.deg2rad(max_tilt)
 
     def compute_control(self, state, pos_d, vel_d, yaw_d, acc_d=None,
                         omega_d=None, omega_d_dot=None):
@@ -291,6 +314,17 @@ class LeeGeometricPD:
         F_des = (-self.kx * e_pos - self.kv * e_vel +
                  self.m * self.g * np.array([0., 0., 1.]) +
                  self.m * acc_d)
+
+        # 推力倾角限制（与 HPC 相同，默认 60°）
+        max_tilt = self.max_tilt
+        F_h = np.linalg.norm(F_des[:2])
+        if F_h > 1e-10:
+            cos_tilt = F_des[2] / np.linalg.norm(F_des)
+            if cos_tilt < np.cos(max_tilt) and F_des[2] > 0:
+                s = F_des[2] * np.tan(max_tilt) / F_h
+                F_des = np.array([s * F_des[0], s * F_des[1], F_des[2]])
+            elif F_des[2] <= 0:
+                F_des = np.array([0., 0., self.m * self.g])
 
         b3_des = F_des / (np.linalg.norm(F_des) + 1e-10)
         R_d = compute_desired_attitude(b3_des, yaw_d)
