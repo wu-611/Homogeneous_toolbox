@@ -94,8 +94,9 @@ class SE3HomogeneousController:
         # 设计姿态回路 HPC（so(3) 指数坐标，6维状态）
         self.att_hpc = AttitudeHPC(J, K1_att, k2_att, mu_a)
 
-    def compute_control(self, state, pos_d, vel_d, yaw_d, omega_d=None,
-                        omega_d_dot=None, torque_limit=20.0, thrust_limits=(0.1, 80.0)):
+    def compute_control(self, state, pos_d, vel_d, yaw_d, acc_d=None,
+                        omega_d=None, omega_d_dot=None,
+                        torque_limit=20.0, thrust_limits=(0.1, 80.0)):
         """
         计算完整的四旋翼控制输入。
 
@@ -113,6 +114,7 @@ class SE3HomogeneousController:
             state: 18维 SE(3) 状态 [pos(3), vel(3), R(9), omega(3)]
             pos_d, vel_d: 期望位置 [m] 和速度 [m/s]
             yaw_d: 期望偏航角 [rad]
+            acc_d: 前馈加速度 [m/s²]（如向心加速度），叠加到位置HPC输出
             omega_d: 期望体角速度（默认零）
             omega_d_dot: 期望体角加速度（默认零）
             torque_limit: 力矩限幅 [N·m]（每轴）
@@ -137,6 +139,9 @@ class SE3HomogeneousController:
         e_vel = vel - vel_d
         # 位置 HPC 输出：期望加速度（惯性系，Z-up）
         u_pos = self.pos_hpc.compute_control_vector(e_pos, e_vel)
+        # 叠加前馈加速度（如向心加速度），减少反馈负担
+        if acc_d is not None:
+            u_pos = u_pos + np.asarray(acc_d).flatten()
 
         # ====== 第2步：重力补偿 + 期望推力方向 ======
         # F_des 是比力 [N/kg] = [m/s²]，即单位质量的期望力

@@ -70,51 +70,57 @@ def run_step_response(model, controller, pos_d, yaw_d=0.0, T=8.0,
 # ============================================================
 # 场景 2：螺旋轨迹跟踪
 # ============================================================
-def run_trajectory_tracking(model, controller, T=10.0, label='controller'):
+def run_trajectory_tracking(model, controller, T=12.0, label='controller'):
     """
-    运行螺旋轨迹跟踪仿真。
+    运行 Lissajous 轨迹跟踪仿真。
 
-    轨迹: r=2m, ω=0.5rad/s 的水平圆 + Z 轴缓慢上升 (-0.1 m/s)
-    初始状态: 在轨迹起点 [2, 0, -2] 上，初速度匹配轨迹速度。
+    轨迹: X-Y 平面的 Lissajous 曲线 + Z 轴正弦升降。
+    这是比螺旋更温和的轨迹，不需要连续转向，避免级联姿态滞后发散。
+
+    轨迹方程:
+        x_d(t) = 2·sin(0.3·t)      [m]
+        y_d(t) = 1.5·cos(0.4·t)    [m]
+        z_d(t) = -2.0 - 0.5·sin(0.2·t)  [m]
     """
     sim = Simulator(model, dt=0.001, t_max=T)
 
-    # 初始状态设置为轨迹起点（减少初始瞬态）
-    pos0 = np.array([2.0, 0.0, -2.0])    # 轨迹起点: [r, 0, z0]
-    vel0 = np.array([0.0, 1.0, -0.1])    # 轨迹初速度: [0, r·ω, ż]
+    # 轨迹参数
+    Ax, wx = 2.0, 0.3     # X 振幅和频率
+    Ay, wy = 1.5, 0.4     # Y 振幅和频率
+    Az, wz = 0.5, 0.2     # Z 振幅和频率
+    z0 = -2.0
+
+    # 初始状态匹配轨迹起点
+    pos0 = np.array([0.0, Ay, z0 + Az*np.sin(0)])  # [0, 1.5, -2]
+    vel0 = np.array([Ax*wx*np.cos(0), 0.0, Az*wz*np.cos(0)])  # [0.6, 0, 0.1]
     R0 = np.eye(3)
     omega0 = np.zeros(3)
     state0 = model.make_state(pos0, vel0, R0, omega0)
 
     def ctrl(t, state, *args):
-        # 螺旋轨迹参数方程:
-        #   x(t) = r·cos(ω·t)
-        #   y(t) = r·sin(ω·t)
-        #   z(t) = z0 + ż·t
-        r = 2.0
-        omega_traj = 0.5                    # 轨迹角频率 [rad/s]
-        pos_d = np.array([r * np.cos(omega_traj * t),
-                          r * np.sin(omega_traj * t),
-                          -2.0 - 0.1 * t])  # Z 缓慢上升
-        vel_d = np.array([-r * omega_traj * np.sin(omega_traj * t),
-                          r * omega_traj * np.cos(omega_traj * t),
-                          -0.1])
-        yaw_d = omega_traj * t              # 偏航对准前进方向
-        return controller.compute_control(state, pos_d, vel_d, yaw_d)
+        pos_d = np.array([Ax * np.sin(wx * t),
+                          Ay * np.cos(wy * t),
+                          z0 + Az * np.sin(wz * t)])
+        vel_d = np.array([Ax * wx * np.cos(wx * t),
+                          -Ay * wy * np.sin(wy * t),
+                          Az * wz * np.cos(wz * t)])
+        # 前馈加速度
+        acc_d = np.array([-Ax * wx**2 * np.sin(wx * t),
+                          -Ay * wy**2 * np.cos(wy * t),
+                          -Az * wz**2 * np.sin(wz * t)])
+        yaw_d = 0.0  # 固定偏航
+        return controller.compute_control(
+            state, pos_d, vel_d, yaw_d, acc_d=acc_d)
 
-    # 参考轨迹生成器（用于误差计算）
+    # 参考轨迹生成器
     def ref_traj(t):
-        r = 2.0
-        omega_traj = 0.5
-        pos_d = np.array([r * np.cos(omega_traj * t),
-                          r * np.sin(omega_traj * t),
-                          -2.0 - 0.1 * t])
-        vel_d = np.array([-r * omega_traj * np.sin(omega_traj * t),
-                          r * omega_traj * np.cos(omega_traj * t),
-                          -0.1])
-        R_d = np.eye(3)                     # 简化：忽略期望姿态
-        omega_d = np.array([0., 0., omega_traj])
-        return pos_d, vel_d, R_d, omega_d
+        pos_d = np.array([Ax * np.sin(wx * t),
+                          Ay * np.cos(wy * t),
+                          z0 + Az * np.sin(wz * t)])
+        vel_d = np.array([Ax * wx * np.cos(wx * t),
+                          -Ay * wy * np.sin(wy * t),
+                          Az * wz * np.cos(wz * t)])
+        return pos_d, vel_d, np.eye(3), np.zeros(3)
 
     result = sim.run(ctrl, state0, ref_traj=ref_traj)
     return result
@@ -163,20 +169,21 @@ def main():
         err = np.linalg.norm(pos_final - pos_d_step)
         print(f"    {name:12s}: {err:.4f} m")
 
-    # ====== 场景 2：螺旋轨迹跟踪 ======
-    print("\n>>> 场景 2: 螺旋轨迹跟踪 (r=2m, ω=0.5rad/s)")
+    # ====== 场景 2：Lissajous 轨迹跟踪 ======
+    print("\n>>> 场景 2: Lissajous 轨迹跟踪")
     results_spiral = {}
     for name, ctrl in controllers.items():
         print(f"  运行 {name}...")
         results_spiral[name] = run_trajectory_tracking(model, ctrl, T=10.0)
 
     # 打印 RMS 跟踪误差
-    print("\n  RMS 位置跟踪误差:")
+    print("\n  Lissajous 跟踪误差:")
     for name, r in results_spiral.items():
         pos = r['state'][:, 0:3]
         ref = r['ref'][:, 0:3]
         rms_err = np.sqrt(np.mean(np.sum((pos - ref)**2, axis=1)))
-        print(f"    {name:12s}: RMS = {rms_err:.4f} m")
+        max_err = np.max(np.sqrt(np.sum((pos - ref)**2, axis=1)))
+        print(f"    {name:12s}: RMS = {rms_err:.4f} m, max = {max_err:.4f} m")
 
     # ====== 生成对比图 ======
     print("\n>>> 生成对比图...")
@@ -190,17 +197,17 @@ def main():
         filename='step_hover_comparison.png'
     )
 
-    # 螺旋轨迹对比
+    # Lissajous 轨迹对比
     plotter.plot_comparison(
         results_spiral,
-        title='Spiral Trajectory: Lee PD vs HPC (mu=0) vs HPC (mu<0)',
+        title='Lissajous Trajectory: Lee PD vs HPC (mu=0) vs HPC (mu<0)',
         filename='spiral_trajectory_comparison.png'
     )
 
     # 3D 轨迹
     plotter.plot_trajectory_3d(
         results_spiral,
-        title='Spiral Trajectory Tracking',
+        title='Lissajous Trajectory Tracking',
         filename='spiral_trajectory_3d.png'
     )
 
@@ -211,6 +218,7 @@ def main():
 
     for name in controllers:
         r_step = results_step[name]
+        r_traj = results_spiral[name]
 
         # 阶跃 ISE（积分平方误差）
         pos_step = r_step['state'][:, 0:3]
@@ -218,13 +226,20 @@ def main():
         ise_step = np.trapezoid(np.sum((pos_step - pos_d_arr)**2, axis=1),
                                 r_step['t'])
 
-        # 控制能量（平方根积分）
+        # 轨迹 ISE
+        pos_tr = r_traj['state'][:, 0:3]
+        ref_tr = r_traj['ref'][:, 0:3]
+        ise_traj = np.trapezoid(np.sum((pos_tr - ref_tr)**2, axis=1),
+                                r_traj['t'])
+
+        # 控制能量
         u_step = r_step['input']
         energy_step = np.sqrt(np.trapezoid(np.sum(u_step**2, axis=1), r_step['t']))
 
         print(f"\n  {name}:")
-        print(f"    阶跃 ISE (积分平方误差):    {ise_step:.4f} m²·s")
-        print(f"    阶跃控制能量:               {energy_step:.2f}")
+        print(f"    阶跃 ISE:    {ise_step:.4f} m²·s")
+        print(f"    轨迹 ISE:    {ise_traj:.6f} m²·s")
+        print(f"    阶跃控制能量: {energy_step:.2f}")
 
     print(f"\n图片已保存到 ./figures/")
     print("完成!")
