@@ -30,7 +30,7 @@
 $$
 \begin{aligned}
 \dot{p} &= v \\
-\dot{v} &= g e_3 - \frac{f}{m} R e_3 \\
+\dot{v} &= -g e_3 + \frac{f}{m} R e_3 \\
 \dot{R} &= R \hat{\omega} \\
 \dot{\omega} &= J^{-1}\left(\tau - \omega \times J\omega\right)
 \end{aligned}
@@ -200,7 +200,7 @@ $$
 $$
 \begin{aligned}
 \dot{e}_p &= e_v \\
-\dot{e}_v &= -\frac{f}{m} (R e_3) \cdot \hat{e}_z + g + \ddot{p}_d
+\dot{e}_v &= \frac{f}{m} (R e_3) \cdot \hat{e}_z - g - \ddot{p}_d
 \end{aligned}
 $$
 
@@ -306,7 +306,7 @@ $$
 
 **工程估算**：由 `lpc2hpc` 输出可知 $A_0 = A + B K_0$ 的特征值全为零（幂零性）。$K_{nl} = K_{linear} - K_0$ 提供了非线性阻尼。$\tilde{\rho}_p$ 的近似值可通过仿真中 $V_p(t)$ 的衰减速率反推。
 
-对默认参数（$m=1.4$ kg, $K_{linear}=[-8.4, -7.0]$, $\mu_p=-0.5$），在单位球面上计算得 $\tilde{\rho}_p \approx 2.8$（详见第 7 章数值验证）。
+对默认参数（$m=1.4$ kg, $K_{linear}=[-8.4, -7.0]$, $\mu_p=-0.5$），通过仿真反推得 $\tilde{\rho}_p = 0.655$（R²=0.986，详见第 7 章数值验证）。
 
 ---
 
@@ -332,7 +332,11 @@ $$
 \dot{\omega}_e = u_{hom} + \Delta(\theta_e, \omega_e)
 $$
 
-其中 $\Delta(\theta_e, \omega_e)$ 包含角速度误差运动学中的非线性补偿项。在 $J_r^{-1}(\theta_e) \approx I$ 的近似下（小角度或经过适当补偿），姿态误差动力学近似为：
+其中 $\Delta(\theta_e, \omega_e)$ 包含角速度误差运动学中的非线性补偿项（来自 $J_r^{-1}$ 偏离 $I$ 和坐标系变换）。
+
+**注**：上述化简假定力矩映射精确抵消了陀螺项和期望角速度的导数项。在实际连续时间系统中，经过 Zhou 2023 的完整力矩映射（Eq. 23），误差动力学确可写为标准形式。但在离散实现中，数值误差可能导致 $\Delta$ 不完全为零。本文的理论分析基于连续时间理想情况。
+
+在小角度下 $J_r^{-1}(\theta_e) \approx I$，姿态误差动力学近似为：
 
 $$
 \dot{\xi} = A_a \xi + B_a u_{hom}, \quad \xi = \begin{bmatrix} \theta_e \\ \omega_e \end{bmatrix}
@@ -360,13 +364,13 @@ $$
 
 故 $G_d \Pi_D = \Pi_D G_d$ ✓。
 
-**跳变时 Lyapunov 函数不增**：
+**跳变时 Lyapunov 函数的行为**：
 
-$$
-V_a(\Pi_D(\xi)) = V_a(-\theta_e, \omega_e) = V_a(\theta_e, \omega_e) = V_a(\xi)
-$$
+当 $\varepsilon \neq 0$ 时，$P$ 的交叉项 $2\varepsilon\theta_e^T\omega_e$ 在 $\theta_e \to -\theta_e$ 下变号。因此 $V_a(\Pi_D(\xi)) \neq V_a(\xi)$ 一般成立。
 
-这是因为 $V_a$ 的定义中 $P$ 的左上块是 $I_3$，$\theta_e$ 取反号时 $V_a$ 不变（$\theta_e$ 沿单位球面的对径点给出相同的 Lyapunov 函数值）。
+但在跳变集 $D$ 上（$|\theta_e| = \pi$, $\theta_e^T\omega_e > 0$），交叉项为正。跳变后 $\theta_e \to -\theta_e$，交叉项变为 $-2\varepsilon\theta_e^T\omega_e < 0$，导致 $y^T P y$ 减小。这意味着**跳变时 $V_a$ 减小**（不增），保持了稳定性论证的有效性。
+
+当 $\varepsilon = 0$（$P$ 分块对角）时，$V_a$ 在跳变下严格不变。实际上 $\varepsilon$ 很小（$\approx 0.035$），跳变时的 $V_a$ 变化量可忽略。
 
 ### 3.3 齐次 Lyapunov 函数
 
@@ -425,7 +429,7 @@ $$
 \boxed{T_a \le \frac{V_a(0)^{-\mu_a}}{-\tilde{\rho}_a \cdot \mu_a}}
 $$
 
-对默认参数（$K_1 = 200 I_3$, $k_2 = 100$, $\mu_a = -0.5$），在第 7 章中通过仿真反推得 $\tilde{\rho}_a \approx 15.6$，对应的 $T_a \le 2 V_a(0)^{0.5} / 15.6$。
+对默认参数（$K_1 = 200 I_3$, $k_2 = 100$, $\mu_a = -0.5$），在第 7 章中通过仿真反推得 $\tilde{\rho}_a = 1.802$（R²=0.987），对应的 $T_a \le 2 V_a(0)^{0.5} / 1.802$。
 
 **关于脉冲跳变的注意**：跳变可能延长实际收敛时间（因为跳变后 $\theta_e$ 方向反转，需要重新收敛）。但上述上界仍然是有效的（跳变时 $V_a$ 不增，连续流上仍满足微分不等式），只是可能偏保守。
 
@@ -451,26 +455,24 @@ $$
 
 位置动力学中的实际加速度为：
 $$
-\dot{v} = g e_3 - \frac{f}{m} R e_3
+\dot{v} = -g e_3 + \frac{f}{m} R e_3
 $$
 
 假设推力 $f$ 被推力映射正确计算为 $f = m F_{des} \cdot (R e_3)$（`se3_homogeneous_full.py:198-199`），则：
 $$
-\dot{v} = g e_3 - \frac{f}{m} R e_3 = g e_3 - \left(F_{des} \cdot (R e_3)\right) R e_3
+\dot{v} = -g e_3 + \frac{f}{m} R e_3 = -g e_3 + \left(F_{des} \cdot (R e_3)\right) R e_3
 $$
-
-这表明实际加速度在惯性系中的方向是 $R e_3$，而非 $b_{3,des}$。**当 $R e_3 \neq b_{3,des}$ 时，推力方向与期望方向有偏差**，这就是姿态误差对位置回路的耦合。
 
 ### 4.2 推力方向误差的几何分解
 
 期望的加速度（无耦合时）应为：
 $$
-\dot{v}_{des} = g e_3 - F_{des}
+\dot{v}_{des} = -g e_3 + F_{des}
 $$
 
 实际加速度为：
 $$
-\dot{v}_{actual} = g e_3 - \left(F_{des} \cdot (R e_3)\right) R e_3
+\dot{v}_{actual} = -g e_3 + \left(F_{des} \cdot (R e_3)\right) R e_3
 $$
 
 耦合加速度误差为：
@@ -821,15 +823,13 @@ $$
 
 **下界估计**：由仿真经验，有效力矩增益 $\approx 4$ N·m/rad（即 $K_1 = 200$，$J \approx 0.02$）是姿态稳定所需的最小值。对于有限时间 + 耦合抑制，推荐有效力矩增益 $\ge 8$ N·m/rad（即 $K_1 \ge 400$）。
 
-**数值示例**：
+**数值示例**（$\mu_a = -0.5$, 初始 $|\theta_e| = 30° = 0.524$ rad, $V_a(0) \approx 0.65$）：
 
-| $K_1$ | $J K_1$ [N·m/rad] | $\tilde{\rho}_a$ | 8 rad 姿态误差收敛时间 |
-|-------|--------------------|-----------------|------------------------------|
-| 100 | 2 | ~8 | 0.5 s |
-| 200 | 4 | ~16 | 0.25 s |
-| 400 | 8 | ~30 | 0.13 s |
-
-（收敛时间按 $\mu_a = -0.5$, $V_a(0) \approx 1$ 估算）
+| $K_1$ | $J_{xx} K_1$ [N·m/rad] | $\tilde{\rho}_a$ (估计) | $T_a$ 上界 [s] |
+|-------|------------------------|----------------------|---------------|
+| 100 | 2.1 | ~1.0 | ~1.6 |
+| 200 | 4.2 | 1.80 | 0.90 |
+| 400 | 8.4 | ~3.0 | ~0.5 |
 
 ### 6.3 $\varepsilon$ 参数的可行区间
 
