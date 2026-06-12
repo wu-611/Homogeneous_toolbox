@@ -1,0 +1,65 @@
+# SE(3) 几何齐次控制器 —— 参数配置
+# ======================================
+# 用于 ROS2 + PX4 SITL 部署
+# 所有单位均为 SI 制
+
+# ---- 四旋翼物理参数 ----
+quadrotor:
+  mass: 1.4                  # 质量 [kg]
+  inertia:
+    Ixx: 0.0211              # 转动惯量 [kg·m²]
+    Iyy: 0.0219
+    Izz: 0.0366
+  gravity: 9.81              # 重力加速度 [m/s²]
+
+# ---- 控制器模式 ----
+controller:
+  mode: "outfb"              # "full" (全状态) 或 "outfb" (输出反馈)
+  frequency: 100.0           # 控制频率 [Hz]
+
+# ---- 齐次度 ----
+homogeneity:
+  mu_p: -0.5                 # 位置回路齐次度 (<0: 有限时间, =0: 指数)
+  mu_a: -0.5                 # 姿态回路齐次度
+  nu: null                   # 观测器齐次度 (null = 自动取 nu_min ≈ -0.5)
+
+# ---- 位置回路增益 ----
+# 线性增益 K_linear = [k_p, k_d]
+# 默认: 极点配置 s=-2,-3 → K = [-6*m, -5*m]
+position:
+  k_p: 8.4                   # 位置比例 [s⁻²] (= 6*m for m=1.4)
+  k_d: 7.0                   # 速度阻尼 [s⁻¹] (= 5*m)
+
+# ---- 姿态回路增益 ----
+# K1: 比例增益 [rad/s² per rad] (角加速度尺度)
+# k2: 阻尼增益 [rad/s² per rad/s]
+# 有效力矩 = J * K1 [N·m/rad]
+# 默认 K1=200 → 有效力矩 J*K1 ≈ 4.2 N·m/rad
+attitude:
+  K1: 200.0                  # 姿态比例增益
+  k2: 100.0                  # 姿态阻尼增益
+  epsilon: null              # P矩阵耦合系数 (null = 自动计算 ≈ 0.035)
+
+# ---- 观测器参数 (仅 outfb 模式) ----
+observer:
+  # Luenberger 增益 (极点 s=-8,-10 → 远快于控制器)
+  L1: -18.0                  # 位置误差反馈
+  L2: -80.0                  # 速度误差反馈
+  alpha: 0.1                 # 齐次范数下界 (防近零点颤振)
+  beta: 100.0                # 齐次范数上界 (防远点衰减)
+
+# ---- 安全限幅 ----
+limits:
+  max_tilt_deg: 60.0         # 最大推力倾角 [°]
+  thrust_min: 0.1            # 最小推力 [N] (>0, 防停转)
+  thrust_max: 80.0           # 最大推力 [N]
+  torque_max: 20.0           # 最大力矩 [N·m] (每轴)
+
+# ---- 控制分配 (PX4 对接) ----
+allocation:
+  hover_thrust: 0.5          # 悬停油门 [0-1] (对应 PX4 MPC_THR_HOVER)
+
+# ---- 调试 ----
+debug:
+  publish_diagnostics: true  # 发布 /hcs_diagnostics 话题
+  log_level: "info"          # "debug", "info", "warn"
