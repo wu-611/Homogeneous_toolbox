@@ -208,11 +208,12 @@ class SE3HomogeneousController:
     def get_debug_info(self, state, pos_d, vel_d, yaw_d):
         """
         返回中间信号，用于调试和日志记录。
+        包含所有限幅后的实际值（与 compute_control 一致）。
 
         调试时可以调用此函数查看:
             - 位置误差和 HPC 输出
-            - 期望力方向和大小
-            - 姿态误差的指数坐标表示
+            - 期望力方向和大小（含倾角限制）
+            - 姿态误差的指数坐标表示（使用限制后的 R_d）
         """
         from models.quadrotor_se3 import QuadrotorSE3
         model = QuadrotorSE3(self.m, self.J, self.g)
@@ -222,22 +223,44 @@ class SE3HomogeneousController:
         e_vel = vel - vel_d
         u_pos = self.pos_hpc.compute_control_vector(e_pos, e_vel)
 
-        F_des = u_pos + np.array([0., 0., self.g])
+        F_des_raw = u_pos + np.array([0., 0., self.g])
+        tilt_raw_deg = np.rad2deg(np.arccos(
+            np.clip(F_des_raw[2] / max(np.linalg.norm(F_des_raw), 1e-10), -1, 1)))
+
+        # 推力倾角限制（与 compute_control 一致）
+        F_des = F_des_raw.copy()
+        tilt_limited = False
+        F_h = np.linalg.norm(F_des[:2])
+        if F_h > 1e-10:
+            cos_tilt = F_des[2] / np.linalg.norm(F_des)
+            if cos_tilt < np.cos(self.max_tilt) and F_des[2] > 0:
+                s = F_des[2] * np.tan(self.max_tilt) / F_h
+                F_des = np.array([s * F_des[0], s * F_des[1], F_des[2]])
+                tilt_limited = True
+            elif F_des[2] <= 0:
+                F_des = np.array([0., 0., self.g])
+                tilt_limited = True
+
         b3_des = F_des / (np.linalg.norm(F_des) + 1e-10)
+        tilt_deg = np.rad2deg(np.arccos(np.clip(b3_des[2], -1, 1)))
 
         R_d = compute_desired_attitude(b3_des, yaw_d)
         theta_e = compute_attitude_error(R, R_d)
-        omega_e = R.T @ R_d @ (omega - np.zeros(3))  # 简化版本
+        omega_e = omega - R.T @ R_d @ np.zeros(3)
 
         return {
             'e_pos': e_pos,
             'e_vel': e_vel,
             'u_pos': u_pos,
+            'F_des_raw': F_des_raw,
             'F_des': F_des,
             'b3_des': b3_des,
             'R_d': R_d,
             'theta_e': theta_e,
             'omega_e': omega_e,
+            'tilt_raw_deg': tilt_raw_deg,
+            'tilt_deg': tilt_deg,
+            'tilt_limited': tilt_limited,
         }
 
 

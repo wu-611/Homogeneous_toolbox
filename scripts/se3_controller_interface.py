@@ -115,9 +115,9 @@ class SE3ControllerInterface:
 
     def __init__(self, mode='outfb',
                  m=1.4, J_xx=0.0211, J_yy=0.0219, J_zz=0.0366, g=9.81,
-                 mu_p=-0.5, mu_a=-0.5, nu=None,
-                 max_tilt_deg=60.0, dt=0.01,
-                 torque_limit=20.0,
+                 mu_p=-0.5, mu_a=-0.5, nu=None, K1=100, k2=50,
+                 max_tilt_deg=45.0, dt=0.01,
+                 torque_limit=10.0, torque_rate_limit=50.0,
                  thrust_min=0.1, thrust_max=80.0):
         """
         参数:
@@ -139,9 +139,13 @@ class SE3ControllerInterface:
         self.g = g
         self.dt = dt
         self.torque_limit = torque_limit
+        self.torque_rate_limit = torque_rate_limit
         self.thrust_min = thrust_min
         self.thrust_max = thrust_max
         self.max_tilt = np.deg2rad(max_tilt_deg)
+
+        # 力矩历史（用于 rate limiting）
+        self._M_prev = np.zeros(3)
 
         # 目标状态
         self._pos_d = np.array([0.0, 0.0, -2.0])
@@ -149,13 +153,18 @@ class SE3ControllerInterface:
         self._yaw_d = 0.0
         self._acc_d = np.zeros(3)
 
-        # 创建控制器组件
+        # 创建控制器组件（传递 K1, k2）
         if mode == 'full':
             self._ctrl = _make_full_state_ctrl(
                 m, self.J, g, mu_p, mu_a, self.max_tilt)
+            # 覆盖默认增益
+            self._ctrl['att_hpc'] = type(self._ctrl['att_hpc'])(
+                self.J, K1=K1, k2=k2, mu=mu_a)
         elif mode == 'outfb':
             self._ctrl = _make_outfb_ctrl(
                 m, self.J, g, mu_p, mu_a, nu, dt, self.max_tilt)
+            self._ctrl['att_hpc'] = type(self._ctrl['att_hpc'])(
+                self.J, K1=K1, k2=k2, mu=mu_a)
         else:
             raise ValueError(f"Unknown mode: {mode}")
 
@@ -267,6 +276,12 @@ class SE3ControllerInterface:
         thrust = np.clip(thrust, self.thrust_min, self.thrust_max)
         M = np.clip(M, -self.torque_limit, self.torque_limit)
 
+        # 力矩变化率限制 (防阶跃)
+        if self.torque_rate_limit > 0 and self.dt > 0:
+            dM_max = self.torque_rate_limit * self.dt
+            M = np.clip(M, self._M_prev - dM_max, self._M_prev + dM_max)
+        self._M_prev = M.copy()
+
         # 保存调试信息
         self.debug = {
             'e_pos': e_pos, 'e_vel': e_vel,
@@ -327,6 +342,12 @@ class SE3ControllerInterface:
 
         thrust = np.clip(thrust, self.thrust_min, self.thrust_max)
         M = np.clip(M, -self.torque_limit, self.torque_limit)
+
+        # 力矩变化率限制 (防阶跃)
+        if self.torque_rate_limit > 0 and self.dt > 0:
+            dM_max = self.torque_rate_limit * self.dt
+            M = np.clip(M, self._M_prev - dM_max, self._M_prev + dM_max)
+        self._M_prev = M.copy()
 
         # 调试信息（含观测器状态）
         e_vel_true = vel - vel_d
