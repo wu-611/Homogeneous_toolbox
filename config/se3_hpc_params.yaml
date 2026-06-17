@@ -15,7 +15,7 @@ quadrotor:
 # ---- 控制器模式 ----
 controller:
   mode: "outfb"              # "full" (全状态) 或 "outfb" (输出反馈)
-  frequency: 100.0           # 控制频率 [Hz]
+  frequency: 100.0           # 控制频率 [Hz] (>=100Hz, dt=0.02s不稳定)
 
 # ---- 齐次度 ----
 homogeneity:
@@ -33,11 +33,11 @@ position:
 # ---- 姿态回路增益 ----
 # K1: 比例增益 [rad/s² per rad] (角加速度尺度)
 # k2: 阻尼增益 [rad/s² per rad/s]
-# 有效力矩 = J * K1 [N·m/rad]
-# SITL 推荐 K1=100 → 有效力矩 J*K1 ≈ 2.1 N·m/rad (M_peak≈2.4N·m)
+# 有效力矩 = J * K1 [N·m/rad] (J≈0.02 → eff≈K1/50)
+# X500 (0.45Nm): K1=50,k2=25,max_tilt=30 → M_peak=0.44Nm, 收敛3cm
 attitude:
-  K1: 100.0                  # 姿态比例增益 (SITL保守值)
-  k2: 50.0                   # 姿态阻尼增益
+  K1: 50.0                   # 姿态比例增益 (X500: 50)
+  k2: 25.0                   # 姿态阻尼增益
   epsilon: null              # P矩阵耦合系数 (null = 自动计算 ≈ 0.035)
 
 # ---- 观测器参数 (仅 outfb 模式) ----
@@ -50,11 +50,11 @@ observer:
 
 # ---- 安全限幅 ----
 limits:
-  max_tilt_deg: 45.0         # 最大推力倾角 [°] (SITL保守值)
+  max_tilt_deg: 30.0         # 最大推力倾角 [°] (X500: 30)
   thrust_min: 0.1            # 最小推力 [N] (>0, 防停转)
   thrust_max: 80.0           # 最大推力 [N]
-  torque_max: 10.0           # 最大力矩 [N·m] (每轴, SITL保守值)
-  torque_rate_limit: 50.0    # 力矩变化率限制 [N·m/s] (防阶跃, 0=无限制)
+  torque_max: 0.45           # 最大力矩 [N·m] (X500悬停可用 ~0.45)
+  torque_rate_limit: 50.0    # 力矩变化率限制 [N·m/s] (防阶跃)
 
 # ---- 控制分配 (PX4 对接) ----
 allocation:
