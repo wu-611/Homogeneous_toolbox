@@ -21,32 +21,17 @@
 ## 1. 文件说明
 
 ```
-Homogeneous_control/
-├── hcs_toolbox_py/                     # Python 齐次控制工具箱 (22 个函数)
-├── hcs_toolbox_cpp/                    # C++ 齐次控制工具箱 (header-only, 16 个头文件)
-│   ├── include/hcs_toolbox/            #   核心函数
-│   ├── src/demo_*.cpp                  #   数值仿真 Demo
-│   └── scripts/plot_*.py               #   绘图脚本
-├── demo_uav/
-│   ├── README.md                       # 本文档
-│   ├── python/
-│   │   ├── uav_homogeneous_control.py  # Python 三回路仿真
-│   │   └── uav_homogeneous_step_response.png
-│   ├── cpp/
-│   │   └── README.md                   # C++ 仿真说明
-│   ├── Compute_All_HPC_Params.m        # MATLAB 参数计算脚本 (原始参考)
-│   ├── Wang_Siyuan_DLE.pdf             # 王思远博士论文
-│   ├── function.txt                    # Simulink 工程实现代码 (含坐标约定)
-│   └── 四旋翼齐次控制器复现与开发规范...md # 开发规范文档
-└── px4_nmpc_ws/uav_nmpc/               # ROS2 节点 (PX4 SITL 部署)
-    ├── include/px4nmpc_learn/
-    │   ├── hcs_coordinate_converter.hpp # NED↔Z-Up 坐标转换
-    │   └── hcs_uav_controller.hpp       # 三回路 HPC 控制器类
-    ├── src/
-    │   ├── hcs_uav_controller.cpp       # 控制器实现
-    │   └── hcs_node.cpp                 # ROS2 节点
-    ├── launch/hcs_offboard.launch.py    # SITL 启动文件
-    └── config/hcs_params.yaml           # 控制器参数
+demo_uav/
+├── README.md                          # 本文档
+├── python/
+│   └── uav_homogeneous_control.py     # Python 三回路仿真
+├── cpp/
+│   ├── CMakeLists.txt                 # C++ 构建
+│   ├── demo_uav_homogeneous_control.cpp  # C++ 三回路仿真
+│   ├── plot_uav_comparison.py         # 绘图脚本
+│   └── README.md                      # C++ 仿真说明
+├── Compute_All_HPC_Params.m           # MATLAB 参数计算脚本 (原始参考)
+└── function.txt                       # Simulink 工程实现代码 (含坐标约定)
 ```
 
 ---
@@ -95,19 +80,19 @@ u = K0·x + ||x||_d^(1+μ) · (K-K0) · d(-ln||x||_d) · x
 ┌─────────────────────────────────────────────────────────┐
 │                   Z 回路 (HPIC)                          │
 │  状态: [z_error, vz]           输入: 净推力 Fz           │
-│  模型: 双积分器 (m=1.07kg)                              │
-│  μ = mu_min (最负容许值, 有限时间收敛)                    │
+│  模型: 双积分器 (m=1.4kg)                                │
+│  μ = -0.5 (有限时间收敛)                                 │
 │  线性增益: K=[-5, -2], Ki=[-0.1, 0]                    │
 ├─────────────────────────────────────────────────────────┤
 │                  Yaw 回路 (HPC)                          │
 │  状态: [ψ_error, ωz]           输入: 偏航力矩 τz          │
-│  模型: 双积分器 (Izz=0.0129)                            │
+│  模型: 双积分器 (Izz=0.0366)                            │
 │  μ = -0.5 (有限时间收敛)                                │
 │  线性增益: K=[-0.39, -0.21]                              │
 ├─────────────────────────────────────────────────────────┤
 │                   XY 回路 (HPC)                          │
 │  状态: [x,y, vx,vy, θ,-φ, q,-p]  输入: [τy, τx_virtual] │
-│  模型: 8阶级联系统 (Ixx=6.85e-3, Iyy=6.62e-3)           │
+│  模型: 8阶级联系统 (Ixx=0.0211, Iyy=0.0219)             │
 │  μ = -1.0 (有限时间收敛, hn⁰=1)                          │
 │  线性增益: LQR 设计 (Q位置=10, R力矩=1)                  │
 │  关键: -φ 使A矩阵对称, 输出τ_roll需取反恢复              │
@@ -142,17 +127,14 @@ A_xy = [0  0  I  0  0  0  0  0]      B_xy = [0      0  ]
 cd /home/wzy/Homogeneous_control
 pip install numpy scipy matplotlib   # 依赖
 
-# 运行仿真
+# 运行仿真 (自动生成 uav_homogeneous_step_response.png)
 python3 demo_uav/python/uav_homogeneous_control.py
-
-# 查看图片 (WSL2)
-explorer.exe demo_uav/python/uav_homogeneous_step_response.png
 ```
 
 ### 4.2 C++ 数值仿真
 
 ```bash
-cd /home/wzy/Homogeneous_control/hcs_toolbox_cpp
+cd /home/wzy/Homogeneous_control/demo_uav/cpp
 
 # 构建
 mkdir -p build && cd build
@@ -162,10 +144,7 @@ cmake .. && make -j$(nproc)
 ./bin/demo_uav_homogeneous_control
 
 # 绘图
-python3 ../scripts/plot_uav_comparison.py
-
-# 查看图片
-explorer.exe ../scripts/uav_comparison_cpp.png
+python3 ../plot_uav_comparison.py
 ```
 
 输出三个 CSV 文件 (`uav_{z,yaw,xy}_comparison_cpp.csv`) 和一个 3×3 对比图表。
@@ -174,158 +153,24 @@ explorer.exe ../scripts/uav_comparison_cpp.png
 
 ## 5. ROS2 + PX4 SITL 部署
 
-### 5.1 前置依赖
+SITL 部署代码位于独立仓库 `/home/wzy/px4_nmpc_ws/hcs_3ring/`，包含：
 
-| 组件 | 版本要求 | 作用 |
-|------|---------|------|
-| Ubuntu | 22.04 (推荐) | 操作系统 |
-| ROS 2 | Humble | 机器人中间件 |
-| PX4-Autopilot | v1.14+ | 飞控固件 (SITL 模式) |
-| px4_msgs | 匹配 PX4 版本 | PX4 ↔ ROS2 消息定义 |
-| Micro XRCE-DDS Agent | 最新 | PX4 ↔ ROS2 通信桥 |
-| Eigen3 | 3.4+ | 线性代数 (apt install libeigen3-dev) |
-
-### 5.2 环境安装 (完整流程)
-
-#### 步骤 1: 安装 ROS 2 Humble
+- Gazebo x500 真值物理参数 (mass=2.064kg, 惯量与本文档不同)
+- 推力链非线性反解 (throttle→ω→F=Kf·ω²)
+- Quad-X 逆混控 + 防饱和
+- direct_actuator 模式接口 + 状态机
+- 飞行 CSV 日志
 
 ```bash
-# 添加 ROS 2 仓库
-sudo apt update && sudo apt install curl gnupg lsb-release
-sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
-  -o /usr/share/keyrings/ros-archive-keyring.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
-  http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" \
-  | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+# 终端1: PX4 SITL
+cd ~/PX4-Autopilot && make px4_sitl gz_x500
 
-sudo apt update
-sudo apt install ros-humble-desktop python3-colcon-common-extensions
-sudo apt install ros-humble-px4-msgs   # PX4 ROS2 消息包
+# 终端2: 控制器
+cd ~/px4_nmpc_ws && source install/setup.bash
+ros2 launch hcs_3ring hcs_3ring.launch.py
 ```
 
-#### 步骤 2: 安装 PX4 SITL
-
-```bash
-cd ~
-git clone https://github.com/PX4/PX4-Autopilot.git --branch v1.14.3 --depth 1
-cd PX4-Autopilot
-git submodule update --init --recursive
-
-# 安装 PX4 构建依赖
-bash ./Tools/setup/ubuntu.sh
-
-# 验证 SITL 构建
-make px4_sitl gazebo-classic
-# 看到 pxh> 提示符表示成功, Ctrl+C 退出
-```
-
-#### 步骤 3: 安装 Micro XRCE-DDS Agent (PX4-ROS2 桥)
-
-```bash
-# 方式1: 从源码构建
-cd ~
-git clone https://github.com/eProsima/Micro-XRCE-DDS-Agent.git --depth 1
-cd Micro-XRCE-DDS-Agent
-mkdir build && cd build
-cmake .. && make -j$(nproc)
-sudo make install
-sudo ldconfig
-
-# 方式2: 使用 snap (Ubuntu 22.04)
-sudo snap install micro-xrce-dds-agent
-```
-
-#### 步骤 4: 配置 ROS2 工作空间
-
-```bash
-# 创建工作空间
-mkdir -p ~/px4_nmpc_ws/src
-cd ~/px4_nmpc_ws/src
-
-# 克隆或复制本项目代码
-# (假设代码在 /home/wzy/Homogeneous_control)
-ln -s /home/wzy/px4_nmpc_ws/uav_nmpc .
-
-cd ~/px4_nmpc_ws
-
-# 安装 Eigen3
-sudo apt install libeigen3-dev
-
-# 构建
-colcon build --packages-select px4nmpc_learn --symlink-install
-
-# 加载环境
-source install/setup.bash
-```
-
-### 5.3 启动顺序 (SITL 完整流程)
-
-终端按顺序打开 **4 个窗口**：
-
-```bash
-# ====== 窗口 1: PX4 SITL ======
-cd ~/PX4-Autopilot
-make px4_sitl gazebo-classic
-# 等待出现 pxh> 提示符
-
-# ====== 窗口 2: Micro XRCE-DDS Agent ======
-MicroXRCEAgent udp4 -p 8888
-# 看到 "client connected" 表示 PX4 已连接
-
-# ====== 窗口 3: ROS2 工作空间 ======
-cd ~/px4_nmpc_ws
-source install/setup.bash
-
-# 验证 PX4 消息可达
-ros2 topic list | grep fmu
-# 应看到 /fmu/out/vehicle_odometry 等话题
-
-# ====== 窗口 4: 齐次控制器 (在确认话题可用后) ======
-cd ~/px4_nmpc_ws
-source install/setup.bash
-
-# 启动 HCS 节点
-ros2 launch px4nmpc_learn hcs_offboard.launch.py
-
-# 自定义目标位置 (例如移动到 (1, 0.5, -2) NED):
-ros2 launch px4nmpc_learn hcs_offboard.launch.py \
-  target_x:=1.0 target_y:=0.5 target_z:=-2.0 target_yaw:=0.0
-```
-
-### 5.4 解锁与飞行
-
-在 QGroundControl (或通过 MAVLink 命令) 中:
-
-```
-1. 等待 GPS/定位就绪 (SITL 自动就绪)
-2. 切换到 Offboard 模式
-3. 解锁 (Arm)
-4. 无人机自动飞向目标位置并悬停
-```
-
-### 5.5 监控与调试
-
-```bash
-# 观察 PX4 状态
-ros2 topic echo /fmu/out/vehicle_odometry --field position
-
-# 观察控制器输出
-ros2 topic echo /fmu/in/vehicle_thrust_setpoint
-ros2 topic echo /fmu/in/vehicle_torque_setpoint
-
-# 观察 HCS 节点日志
-ros2 topic echo /rosout | grep hcs
-```
-
-### 5.6 SITL 测试用例
-
-| 测试 | 命令 | 验证标准 |
-|------|------|---------|
-| 悬停 | `target_x:=0 target_y:=0 target_z:=-2.0` | 高度稳定在 2m, 漂移 < 0.2m |
-| X阶跃 | `target_x:=1.0 target_y:=0 target_z:=-2.0` | 无超调, 收敛 < 3s |
-| Y阶跃 | `target_x:=0 target_y:=1.0 target_z:=-2.0` | 无超调, 收敛 < 3s |
-| 偏航 | `target_yaw:=1.57` | 平滑旋转 90°, 无高度变化 |
-| 抗扰动 | 悬停中 Gazebo 加风力 | 恢复时间 < 2s |
+齐次控制理论应用与本 demo 完全一致，差异仅在于工程参数和接口层。
 
 ---
 
@@ -349,14 +194,14 @@ ros2 topic echo /rosout | grep hcs
 
 ### 生成的图表
 
-- `python/uav_homogeneous_step_response.png` — 3×3 面板 (线性 vs HPC 对比, 对数坐标)
-- `hcs_toolbox_cpp/scripts/uav_comparison_cpp.png` — C++ 版本 3×3 对比
+- Python 仿真自动生成 `python/uav_homogeneous_step_response.png`
+- C++ 仿真通过 `cpp/plot_uav_comparison.py` 从 CSV 生成对比图
 
 ---
 
 ## 7. 坐标系约定 (关键)
 
-这是 ROS2 部署中最容易出错的环节。详细分析见 `hcs_coordinate_converter.hpp` 注释。
+这是 ROS2 部署中最容易出错的环节。详细实现见 `px4_nmpc_ws/hcs_3ring/` 节点代码。
 
 ### 三个坐标系
 
@@ -393,18 +238,17 @@ NED/FRD 中姿态角的加速度符号不对称：
 
 ## 8. 参数对照表
 
-### 无人机物理参数
+### 无人机物理参数 (数值仿真)
 
-| 参数 | 数值仿真值 | SITL 部署值 | 单位 |
-|------|----------|-----------|------|
-| 质量 m | 1.4 | **1.07** | kg |
-| Ixx (滚转) | 0.0211 | **0.00685** | kg·m² |
-| Iyy (俯仰) | 0.0219 | **0.00662** | kg·m² |
-| Izz (偏航) | 0.0366 | **0.0129** | kg·m² |
-| 重力 g | 9.8 | 9.81 | m/s² |
+| 参数 | 值 | 单位 |
+|------|-----|------|
+| 质量 m | 1.4 | kg |
+| Ixx (滚转) | 0.0211 | kg·m² |
+| Iyy (俯仰) | 0.0219 | kg·m² |
+| Izz (偏航) | 0.0366 | kg·m² |
+| 重力 g | 9.8 | m/s² |
 
-> **注意**: 数值仿真和 SITL 部署使用不同参数! `Compute_All_HPC_Params.m` 使用仿真值,
-> 而 `hcs_params.yaml` 和 `四旋翼齐次控制器复现与开发规范...md` 使用 SITL 部署值。
+> **注意**: SITL 部署版 (`px4_nmpc_ws/hcs_3ring/`) 使用 Gazebo x500 真值参数，惯量/质量与本仿真不同。
 
 ### Z 回路 (HPIC)
 

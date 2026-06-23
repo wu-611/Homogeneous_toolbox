@@ -42,7 +42,8 @@ hcs_toolbox_cpp/
 │       ├── e_hpc.hpp                  # HPC 控制求值
 │       ├── e_hpic.hpp                 # HPIC 控制求值
 │       ├── e_fhpc.hpp                 # 固定时间 FHPC
-│       └── e_fhpic.hpp                # 固定时间 FHPIC
+│       ├── e_fhpic.hpp                # 固定时间 FHPIC
+│       └── lqr.hpp                    # LQR 设计 (已知 Schur 排序 bug, 慎用)
 ├── src/
 │   ├── demo_lpc2hpc.cpp               # Demo 1: 倒立摆 HPC 升级
 │   ├── demo_lpic2hpic.cpp             # Demo 2: 倒立摆 HPIC 升级
@@ -53,7 +54,7 @@ hcs_toolbox_cpp/
     └── plot_demo_distance_square.py   # Demo 3 绘图脚本
 ```
 
-**16 个头文件，3 个 Demo，3 个绘图脚本**。全部 header-only，无编译依赖（除 Eigen3）。
+**17 个头文件，3 个 Demo，3 个绘图脚本**。全部 header-only，无编译依赖（除 Eigen3）。
 
 ---
 

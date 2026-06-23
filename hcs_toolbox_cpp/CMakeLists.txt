@@ -38,13 +38,11 @@ endfunction()
 add_hcs_demo(demo_lpc2hpc                src/demo_lpc2hpc.cpp)
 add_hcs_demo(demo_lpic2hpic              src/demo_lpic2hpic.cpp)
 add_hcs_demo(demo_lpc_hpc_distance_square src/demo_lpc_hpc_distance_square.cpp)
-add_hcs_demo(demo_uav_homogeneous_control src/demo_uav_homogeneous_control.cpp)
 
 # ============================================================
 # Install
 # ============================================================
 install(TARGETS demo_lpc2hpc demo_lpic2hpic demo_lpc_hpc_distance_square
-         demo_uav_homogeneous_control
     RUNTIME DESTINATION bin
 )
 install(DIRECTORY include/
@@ -54,6 +52,5 @@ install(PROGRAMS
     scripts/plot_demo_lpc2hpc.py
     scripts/plot_demo_lpic2hpic.py
     scripts/plot_demo_distance_square.py
-    scripts/plot_uav_comparison.py
     DESTINATION bin
 )
